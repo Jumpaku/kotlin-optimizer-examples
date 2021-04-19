@@ -1,0 +1,29 @@
+plugins {
+    id('org.jetbrains.kotlin.jvm').version('1.4.10')
+}
+
+group = 'jumpaku'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+    maven {
+        url "https://nexus.jumpaku.net/repository/maven-public/"
+    }
+}
+
+dependencies {
+    implementation("org.jetbrains.kotlin:kotlin-stdlib")
+    implementation("jumpaku:jumpaku-curves-core:3.0.0-alpha-6")
+    implementation("jumpaku:jumpaku-curves-fsc:3.0.0-alpha-6")
+    implementation("jumpaku:jumpaku-curves-graphics:3.0.0-alpha-6")
+}
+
+
+
+tasks.named("compileKotlin") {
+    kotlinOptions.jvmTarget = "1.8"
+}
+tasks.named("compileTestKotlin") {
+    kotlinOptions.jvmTarget = "1.8"
+}
