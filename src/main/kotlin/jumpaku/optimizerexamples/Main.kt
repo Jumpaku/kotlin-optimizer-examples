@@ -1,73 +1,126 @@
 package jumpaku.optimizerexamples
 
-import org.apache.commons.math3.linear.MatrixUtils
-import org.apache.commons.math3.linear.RealVector
-import org.apache.commons.math3.optim.InitialGuess
-import org.apache.commons.math3.optim.MaxEval
-import org.apache.commons.math3.optim.SimpleBounds
-import org.apache.commons.math3.optim.nonlinear.scalar.GoalType
-import org.apache.commons.math3.optim.nonlinear.scalar.ObjectiveFunction
-import org.apache.commons.math3.optim.nonlinear.scalar.noderiv.CMAESOptimizer
-import org.apache.commons.math3.random.MersenneTwister
-import kotlin.math.*
-
-
-fun cmaes(seed: Int, iterations: Int, initial: RealVector, objective: (RealVector) -> Double): Pair<RealVector, Double> {
-    val dimension = initial.dimension
-    val populationSize = 5* (4 + 3 * ceil(log(E, dimension.toDouble()))).toInt()
-    val optimizer = CMAESOptimizer(
-            iterations,
-            0.0,
-            true,
-            0,
-            0,
-            MersenneTwister(seed),
-            true,
-            { iteration, _, _ -> iteration >= iterations }
-    )
-    val result = optimizer.optimize(
-            CMAESOptimizer.Sigma(DoubleArray(dimension) { 1.0 }),
-            CMAESOptimizer.PopulationSize(populationSize),
-            ObjectiveFunction { x -> objective(MatrixUtils.createRealVector(x)) },
-            GoalType.MINIMIZE,
-            InitialGuess(initial.toArray()),
-            SimpleBounds(
-                    DoubleArray(dimension) { Double.NEGATIVE_INFINITY },
-                    DoubleArray(dimension) { Double.POSITIVE_INFINITY }),
-            MaxEval(populationSize * iterations)
-    )
-    optimizer.statisticsFitnessHistory.forEachIndexed { i, f ->
-        println("$i: $f")
-    }
-    return result.run { MatrixUtils.createRealVector(point) to value }
-}
-
-fun rastrigin(x: RealVector): Double {
-    val n = x.dimension
-    val a = 10
-    val fx = a * n + x.toArray().sumByDouble { xi -> xi * xi - a * cos(2 * PI * xi) }
-    return fx
-}
-
-fun ackley(x: RealVector): Double {
-    val a = -20 * exp(-0.2 * sqrt(x.dotProduct(x) / 2))
-    val b = -exp(0.5 * cos(2 * PI * x.getEntry(0)) + 0.5 * cos(2 * PI * x.getEntry(1)))
-    val fx = a + b + E + 20
-    return fx
-}
-
-fun rosenbrock(x: RealVector): Double {
-    val fx = x.toArray().toList().zipWithNext { a, b -> 100 * (b - a * a) * (b - a * a) + (1 - a) * (1 - a) }.sum()
-    return fx
-}
+import jumpaku.commons.control.None
+import jumpaku.commons.control.Option
+import jumpaku.commons.control.Some
+import jumpaku.curves.core.curve.Interval
+import jumpaku.curves.core.curve.ParamPoint
+import jumpaku.curves.core.curve.bspline.BSpline
+import jumpaku.curves.core.geom.Point
+import jumpaku.curves.core.transform.Translate
+import jumpaku.curves.fsc.DrawingStroke
+import jumpaku.curves.fsc.generate.Fuzzifier
+import jumpaku.curves.fsc.generate.Generator
+import jumpaku.curves.graphics.drawCubicBSpline
+import jumpaku.curves.graphics.drawPoints
+import jumpaku.curves.graphics.swing.DrawingPanel
+import java.awt.Color
+import java.awt.Dimension
+import java.awt.Graphics
+import java.awt.Graphics2D
+import javax.swing.JFrame
+import javax.swing.JPanel
+import javax.swing.SwingUtilities
+import kotlin.math.PI
+import kotlin.math.acos
+import kotlin.math.cos
+import kotlin.math.sin
 
 fun main() {
-    val initial = MatrixUtils.createRealVector(doubleArrayOf(-1.0, -1.0))
-    val answer = cmaes(
-            1089,
-            50,
-            initial,
-            ::rastrigin
+    SwingUtilities.invokeLater {
+        val demo = DemoPanel()
+        val drawing = DrawingPanel().apply {
+            addCurveListener {
+                val w = 0.1//sqrt(0.5+0.5*0.707)//0.707//0.0//0.707//
+                val theta = 2 * 2 * acos(w)
+                val span = 10.0
+                val samples = 200
+                val r = 100.0
+                val stroke = Interval(PI / 2 - theta / 2, PI / 2 + theta / 2).sample(samples).mapIndexed { index, a ->
+                    val param = span * index / samples
+                    val point = Point.xy(
+                        r * cos(a), -r * sin(a)
+                        //param * 20, 0.0
+                    ).transform(Translate(r * 2, r * 2))
+                    ParamPoint(point, param)
+                }
+                //demo.update(DrawingStroke(stroke))
+                demo.update(it.drawingStroke)
+            }
+            add(demo)
+        }
+        JFrame("GestureDemo").apply {
+            defaultCloseOperation = JFrame.EXIT_ON_CLOSE
+            contentPane.add(drawing)
+            pack()
+            isVisible = true
+        }
+    }
+}
+
+object Settings {
+
+    val width = 640
+
+    val height = 480
+
+    val generator: Generator = Generator(
+        degree = 3,
+        knotSpan = 0.1,
+        fillSpan = 0.0375,
+        extendInnerSpan = 0.075,
+        extendOuterSpan = 0.075,
+        extendDegree = 2,
+        fuzzifier = Fuzzifier.Linear(
+            velocityCoefficient = 0.007,
+            accelerationCoefficient = 0.008
+        )
     )
-    println(answer)
+}
+
+class DemoPanel : JPanel() {
+
+    init {
+        preferredSize = Dimension(
+            Settings.width,
+            Settings.height
+        )
+    }
+
+    var fscOpt: Option<BSpline> = None
+    var updated = false
+
+    fun update(drawingStroke: DrawingStroke) {
+        val fsc = Settings.generator.generate(drawingStroke)
+
+        fscOpt = Some(fsc)
+        updated = true
+
+        repaint()
+    }
+
+    override fun paint(g: Graphics) {
+        if (!updated) return
+        fscOpt.forEach { s ->
+            val (w, ts) = findFarsAndWeight(0, s)
+            val ps = ts.map(s)
+            println("params: $ts")
+            println("weight: $w")
+            val g2d = g as Graphics2D
+            g2d.drawCubicBSpline(s) { it.color = Color.BLACK }
+            g2d.drawPoints(ts.map(s).map { it.copy(r = 5.0) }) { it.color = Color.BLACK }
+            g2d.drawPoints(listOf(
+                bezier(-0.25, ps[1], ps[2], ps[3], w),
+                bezier(0.0, ps[1], ps[2], ps[3], w),
+                bezier(0.25, ps[1], ps[2], ps[3], w),
+                bezier(0.5, ps[1], ps[2], ps[3], w),
+                bezier(0.75, ps[1], ps[2], ps[3], w),
+                bezier(1.0, ps[1], ps[2], ps[3], w),
+                bezier(1.25, ps[1], ps[2], ps[3], w),
+                bezier(-0.5 / w, ps[1], ps[2], ps[3], w),
+                bezier((w + 0.5) / w, ps[1], ps[2], ps[3], w),
+            ).map { it.copy(r = 3.0) })
+            updated = false
+        }
+    }
 }
