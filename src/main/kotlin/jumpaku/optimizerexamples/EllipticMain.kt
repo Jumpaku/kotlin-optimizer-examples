@@ -1,11 +1,8 @@
 package jumpaku.optimizerexamples
 
-import jumpaku.commons.control.result
-import jumpaku.curves.core.curve.arclength.ReparametrizedCurve
 import jumpaku.curves.core.curve.bspline.BSpline
 import jumpaku.curves.core.geom.Point
 import jumpaku.curves.core.geom.lerp
-import jumpaku.curves.core.transform.Calibrate
 import jumpaku.curves.fsc.identify.primitive.reference.EllipticGenerator
 import org.apache.commons.math3.optim.*
 import org.apache.commons.math3.optim.nonlinear.scalar.GoalType
@@ -13,7 +10,10 @@ import org.apache.commons.math3.optim.nonlinear.scalar.ObjectiveFunction
 import org.apache.commons.math3.optim.nonlinear.scalar.noderiv.CMAESOptimizer
 import org.apache.commons.math3.random.MersenneTwister
 import org.apache.commons.math3.util.ArithmeticUtils
-import kotlin.math.*
+import kotlin.math.E
+import kotlin.math.exp
+import kotlin.math.log
+import kotlin.math.sqrt
 
 
 data class EvalResult(val weight: Double, val params: List<Double>, val evaluation: Double)
@@ -31,34 +31,6 @@ fun bezier(t: Double, p0: Point, p1: Point, p2: Point, w: Double): Point {
     return p1.lerp(c0 to p0, c2 to p2)
 }
 
-fun evaluateFarsAndWeight(xs: DoubleArray, s: BSpline, farsCount: Int): EvalResult {
-    require(xs.size == 4)
-    val weight = (sigmoid(xs[0]) * 2 - 1).coerceIn(-0.999, 0.999)
-    val (t0, t4) = s.domain
-    val t2 = t0.lerp(sigmoid(xs[1]), t4).coerceIn(t0, t4)
-    val t1 = t0.lerp(sigmoid(xs[2]), t2).coerceIn(t0, t2)
-    val t3 = t2.lerp(sigmoid(xs[3]), t4).coerceIn(t2, t4)
-    val ts = listOf(t0, t1, t2, t3, t4)
-    val ps = ts.map(s)
-    val theta = 2 * acos(weight)
-    val qs = (0 until farsCount).map { i ->
-        val a = i * theta * 0.5 + PI / 2
-        Point.xy(cos(a), sin(a))
-    }
-    val calibrate = result {
-        Calibrate(ps[1] to qs[1], ps[2] to qs[2], ps[3] to qs[3])
-    }.tryRecover {
-        Calibrate(ps[1] to qs[1], ps[3] to qs[3])
-    }.orRecover {
-        Calibrate(ps[2] to qs[2])
-    }
-    val reparametrised = ReparametrizedCurve.of(s.transform(calibrate), s.domain.sample(100))
-    val rs = reparametrised.sample(farsCount)
-    val params = rs.map { reparametrised.reparametrizer.toOriginal(it.param) }
-    val error = qs.zip(rs).sumByDouble { (q, r) -> q.distSquare(r.point) }
-    return EvalResult(weight, params, error)
-}
-
 fun findFarsAndWeight(depth: Int, s: BSpline): Pair<Double, List<Double>> {
     val nSamples = 100
     val (t0, t4) = s.domain
@@ -66,12 +38,13 @@ fun findFarsAndWeight(depth: Int, s: BSpline): Pair<Double, List<Double>> {
     val t1 = EllipticGenerator.computeEllipticFar(s, t0, t2, nSamples)
     val t3 = EllipticGenerator.computeEllipticFar(s, t2, t4, nSamples)
     val w = EllipticGenerator.computeEllipticWeight(s, t1, t3, t2, s.domain, nSamples)
-    val initial = doubleArrayOf(
-        log((1 + w) / (1 - w), E),
-        log(((t2 - t0) / (t4 - t0)).let { y -> y / (1 - y) }, E),
-        log(((t1 - t0) / (t2 - t0)).let { y -> y / (1 - y) }, E),
-        log(((t3 - t2) / (t4 - t2)).let { y -> y / (1 - y) }, E)
-    )
+    val initial = doubleArrayOf(0.0, 0.0, 0.0, 0.5 * sqrt(2.0))
+    /*doubleArrayOf (
+            log((1 + w) / (1 - w), E),
+    log(((t2 - t0) / (t4 - t0)).let { y -> y / (1 - y) }, E),
+    log(((t1 - t0) / (t2 - t0)).let { y -> y / (1 - y) }, E),
+    log(((t3 - t2) / (t4 - t2)).let { y -> y / (1 - y) }, E)
+    )*/
     val iterations = 100
     val checker = ConvergenceChecker<PointValuePair> { iteration, _, _ -> iteration >= iterations }
     val optimizer = CMAESOptimizer(
@@ -96,7 +69,7 @@ fun findFarsAndWeight(depth: Int, s: BSpline): Pair<Double, List<Double>> {
     val dimension = 4
     val populationSize = 100
     val r = optimizer.optimize(
-        CMAESOptimizer.Sigma(doubleArrayOf(0.01, 0.01, 0.01, 0.01)),
+        CMAESOptimizer.Sigma(doubleArrayOf(1.0, 1.0, 1.0, 1.0)),
         CMAESOptimizer.PopulationSize(populationSize),
         ObjectiveFunction { x -> evaluateFarsAndWeight2(x, s, farsCount).evaluation },
         GoalType.MINIMIZE,

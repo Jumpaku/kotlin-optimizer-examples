@@ -11,6 +11,7 @@ import jumpaku.curves.core.transform.Translate
 import jumpaku.curves.fsc.DrawingStroke
 import jumpaku.curves.fsc.generate.Fuzzifier
 import jumpaku.curves.fsc.generate.Generator
+import jumpaku.curves.graphics.DrawStyle
 import jumpaku.curves.graphics.drawCubicBSpline
 import jumpaku.curves.graphics.drawPoints
 import jumpaku.curves.graphics.swing.DrawingPanel
@@ -21,10 +22,7 @@ import java.awt.Graphics2D
 import javax.swing.JFrame
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
-import kotlin.math.PI
-import kotlin.math.acos
-import kotlin.math.cos
-import kotlin.math.sin
+import kotlin.math.*
 
 fun main() {
     SwingUtilities.invokeLater {
@@ -108,18 +106,11 @@ class DemoPanel : JPanel() {
             println("weight: $w")
             val g2d = g as Graphics2D
             g2d.drawCubicBSpline(s) { it.color = Color.BLACK }
-            g2d.drawPoints(ts.map(s).map { it.copy(r = 5.0) }) { it.color = Color.BLACK }
-            g2d.drawPoints(listOf(
-                bezier(-0.25, ps[1], ps[2], ps[3], w),
-                bezier(0.0, ps[1], ps[2], ps[3], w),
-                bezier(0.25, ps[1], ps[2], ps[3], w),
-                bezier(0.5, ps[1], ps[2], ps[3], w),
-                bezier(0.75, ps[1], ps[2], ps[3], w),
-                bezier(1.0, ps[1], ps[2], ps[3], w),
-                bezier(1.25, ps[1], ps[2], ps[3], w),
-                bezier(-0.5 / w, ps[1], ps[2], ps[3], w),
-                bezier((w + 0.5) / w, ps[1], ps[2], ps[3], w),
-            ).map { it.copy(r = 3.0) })
+            g2d.drawPoints(ts.map(s).mapIndexed { i, p -> p.copy(r = 2.0 * (i + 1)) }) { it.color = Color.BLACK }
+            val evals = Interval(min(0.0, -0.5 / w), max(1.0, (w + 0.5) / w))
+                .sample(0.05)
+                .map { bezier(it, ps[1], ps[2], ps[3], w) }
+            g2d.drawPoints(evals.map { it.copy(r = 2.0) }, DrawStyle(Color.RED))
             updated = false
         }
     }
